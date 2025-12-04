@@ -1,20 +1,78 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { AvailabilityToggle } from "@/components/driver/AvailabilityToggle";
 import { RideRequestCard } from "@/components/driver/RideRequestCard";
 import { EarningsCard } from "@/components/driver/EarningsCard";
-import { MapPlaceholder } from "@/components/booking/MapPlaceholder";
+import { MapboxMap } from "@/components/booking/MapboxMap";
 import { toast } from "@/hooks/use-toast";
 import { Star, TrendingUp, Shield } from "lucide-react";
+
+// Sample locations for simulation
+const SAMPLE_RIDES = [
+  {
+    pickup: { lat: 12.9716, lng: 77.5946 },
+    dropoff: { lat: 12.9352, lng: 77.6245 },
+    pickupAddress: "MG Road, Bangalore",
+    dropoffAddress: "Koramangala, Bangalore",
+    distance: "4.2 km",
+    fare: "$18.50",
+  },
+  {
+    pickup: { lat: 12.9856, lng: 77.6056 },
+    dropoff: { lat: 12.9566, lng: 77.6412 },
+    pickupAddress: "Indiranagar, Bangalore",
+    dropoffAddress: "Whitefield, Bangalore",
+    distance: "8.5 km",
+    fare: "$32.00",
+  },
+];
 
 export default function DriverDashboard() {
   const [isOnline, setIsOnline] = useState(false);
   const [hasRequest, setHasRequest] = useState(false);
   const [activeTrip, setActiveTrip] = useState(false);
+  const [currentRide, setCurrentRide] = useState(SAMPLE_RIDES[0]);
+  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [eta, setEta] = useState<number | null>(null);
+
+  // Simulate driver movement when trip is active
+  useEffect(() => {
+    if (!activeTrip || !driverLocation) return;
+
+    const target = currentRide.dropoff;
+    const interval = setInterval(() => {
+      setDriverLocation((prev) => {
+        if (!prev) return prev;
+        
+        const newLat = prev.lat + (target.lat - prev.lat) * 0.05;
+        const newLng = prev.lng + (target.lng - prev.lng) * 0.05;
+        
+        // Check if close enough to destination
+        const distance = Math.sqrt(
+          Math.pow(target.lat - newLat, 2) + Math.pow(target.lng - newLng, 2)
+        );
+        
+        if (distance < 0.001) {
+          clearInterval(interval);
+          return target;
+        }
+        
+        return { lat: newLat, lng: newLng };
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeTrip, currentRide.dropoff]);
 
   const handleToggleOnline = () => {
     setIsOnline(!isOnline);
     if (!isOnline) {
+      // Set initial driver location
+      setDriverLocation({
+        lat: 12.9716 + (Math.random() - 0.5) * 0.02,
+        lng: 77.5946 + (Math.random() - 0.5) * 0.02,
+      });
+      
       toast({
         title: "You're now online",
         description: "You'll receive ride requests from nearby riders.",
@@ -22,6 +80,7 @@ export default function DriverDashboard() {
       // Simulate incoming request after going online
       setTimeout(() => {
         if (!activeTrip) {
+          setCurrentRide(SAMPLE_RIDES[Math.floor(Math.random() * SAMPLE_RIDES.length)]);
           setHasRequest(true);
         }
       }, 5000);
@@ -31,12 +90,15 @@ export default function DriverDashboard() {
         description: "You won't receive any ride requests.",
       });
       setHasRequest(false);
+      setDriverLocation(null);
     }
   };
 
   const handleAcceptRide = () => {
     setHasRequest(false);
     setActiveTrip(true);
+    // Move driver to pickup location
+    setDriverLocation(currentRide.pickup);
     toast({
       title: "Ride Accepted!",
       description: "Navigate to the pickup point to meet your rider.",
@@ -52,9 +114,30 @@ export default function DriverDashboard() {
     // Simulate another request
     setTimeout(() => {
       if (isOnline && !activeTrip) {
+        setCurrentRide(SAMPLE_RIDES[Math.floor(Math.random() * SAMPLE_RIDES.length)]);
         setHasRequest(true);
       }
     }, 8000);
+  };
+
+  const handleCompleteTrip = () => {
+    setActiveTrip(false);
+    setDriverLocation({
+      lat: currentRide.dropoff.lat + (Math.random() - 0.5) * 0.01,
+      lng: currentRide.dropoff.lng + (Math.random() - 0.5) * 0.01,
+    });
+    toast({
+      title: "Trip Completed",
+      description: `You earned ${currentRide.fare} from this trip!`,
+    });
+    
+    // Simulate new request after completion
+    setTimeout(() => {
+      if (isOnline) {
+        setCurrentRide(SAMPLE_RIDES[Math.floor(Math.random() * SAMPLE_RIDES.length)]);
+        setHasRequest(true);
+      }
+    }, 10000);
   };
 
   return (
@@ -79,10 +162,10 @@ export default function DriverDashboard() {
               {/* Ride Request */}
               {hasRequest && (
                 <RideRequestCard
-                  pickup="123 Main Street, Downtown"
-                  dropoff="456 Oak Avenue, Uptown"
-                  distance="4.2 km"
-                  fare="$18.50"
+                  pickup={currentRide.pickupAddress}
+                  dropoff={currentRide.dropoffAddress}
+                  distance={currentRide.distance}
+                  fare={currentRide.fare}
                   timeLeft={15}
                   onAccept={handleAcceptRide}
                   onDecline={handleDeclineRide}
@@ -125,34 +208,45 @@ export default function DriverDashboard() {
             </div>
 
             {/* Right Column - Map */}
-            <div className="lg:col-span-2 h-[400px] lg:h-auto">
-              <MapPlaceholder
-                className="h-full min-h-[400px] lg:min-h-[600px]"
+            <div className="lg:col-span-2 space-y-4">
+              <MapboxMap
+                className="h-[400px] lg:h-[500px]"
                 showRoute={activeTrip}
-                driverLocation={isOnline ? { lat: 0, lng: 0 } : null}
+                driverLocation={driverLocation}
+                pickupLocation={activeTrip ? currentRide.pickup : (hasRequest ? currentRide.pickup : null)}
+                dropoffLocation={activeTrip ? currentRide.dropoff : (hasRequest ? currentRide.dropoff : null)}
+                onEtaUpdate={setEta}
               />
               
               {/* Active Trip Overlay */}
               {activeTrip && (
-                <div className="mt-4 p-4 rounded-xl glass-strong animate-slide-up">
+                <div className="p-4 rounded-xl glass-strong animate-slide-up">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Active Trip</p>
-                      <p className="font-display font-bold text-foreground">En route to pickup</p>
+                      <p className="font-display font-bold text-foreground">
+                        {eta ? `ETA: ${eta} min to destination` : 'En route to destination'}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {currentRide.pickupAddress} → {currentRide.dropoffAddress}
+                      </p>
                     </div>
                     <button
-                      onClick={() => {
-                        setActiveTrip(false);
-                        toast({
-                          title: "Trip Completed",
-                          description: "You earned $18.50 from this trip!",
-                        });
-                      }}
+                      onClick={handleCompleteTrip}
                       className="px-4 py-2 rounded-lg bg-success text-success-foreground font-semibold hover:bg-success/90 transition-colors"
                     >
                       Complete Trip
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* Pending Request Info */}
+              {hasRequest && !activeTrip && (
+                <div className="p-4 rounded-xl glass animate-fade-in">
+                  <p className="text-sm text-muted-foreground">
+                    New ride request! Check the pickup and drop-off locations on the map.
+                  </p>
                 </div>
               )}
             </div>
